@@ -264,7 +264,7 @@ function topbar() {
   </header>`;
 }
 function tabbar() {
-  const t = [['map', '🗺️', 'Aventure'], ['cards', '🃏', 'Cartes'], ['trophies', '🏆', 'Trophées'], ['parents', '👪', 'Parents']];
+  const t = [['map', '🗺️', 'Aventure'], ['cards', '🃏', 'Cartes'], ['trophies', '🏆', 'Trophées'], ['parents', '🧑‍🏫', 'Parents & profs']];
   return `<nav class="tabbar">${t.map(([id, e, n]) => `<button data-tab="${id}" class="${tab === id ? 'on' : ''}"><span class="e">${e}</span>${n}</button>`).join('')}</nav>`;
 }
 function bindChrome() {
@@ -286,7 +286,7 @@ function renderProfiles() {
     <p class="tagline">Qui joue aujourd'hui ?</p>
     <div class="profiles">
       ${S.profiles.map(p => `<button class="profile" data-id="${p.id}"><span class="face">${p.avatar}</span><span class="nm">${esc(p.name)}</span><span class="sub">${LANGS[p.lang].flag} ⭐ ${Object.values(p.progress).reduce((a, pr) => a + Object.values(pr).reduce((b, u) => b + ACTS.reduce((c, x) => c + (u[x.id] || 0), 0), 0), 0)}</span></button>`).join('')}
-      ${S.profiles.length < 8 ? `<button class="profile add" data-a="add"><span class="face">➕</span><span class="nm">Nouveau</span></button>` : ''}
+      ${S.profiles.length < 40 ? `<button class="profile add" data-a="add"><span class="face">➕</span><span class="nm">Nouveau</span></button>` : ''}
     </div>
   </div>`;
   on('.profile[data-id]', el => { S.current = el.dataset.id; save(); SFX.ok(); tab = 'map'; worldSel = null; go(renderMain); });
@@ -709,7 +709,7 @@ function finish(r) {
   p.coins += bonus;
   const xp = (r.correct || 0) * 10 + r.stars * 10;
   const lvlBefore = playerLevel(p.xp); p.xp += xp; const lvlUp = playerLevel(p.xp) > lvlBefore;
-  p.langs = p.langs || {}; p.langs[lang] = 1;
+  p.langs = p.langs || {}; p.langs[lang] = 1; p.last = Date.now();
   touchStreak();
   const badges = checkBadges({ finished: true, act: r.act, stars: r.stars, score: r.score, noHint: r.noHint, daily: r.daily });
   save();
@@ -796,13 +796,36 @@ function renderTrophies() {
   bindChrome();
 }
 
-// ---------- Espace parents ----------
+// ---------- Espace parents & professeurs ----------
+// Résumé d'un élève dans une langue (pour la vue classe et l'export).
+function studentStats(p, k) {
+  const pr = p.progress[k] || {};
+  return {
+    level: (p.start && p.start[k]) || 'A1',
+    done: ALL_UNITS.filter(u => (pr[u.id] || {}).quiz).length,
+    stars: Object.values(pr).reduce((a, u) => a + ACTS.reduce((b, x) => b + (u[x.id] || 0), 0), 0),
+    words: Object.keys(p.learned[k] || {}).length,
+  };
+}
+const lastSeen = p => p.last ? new Date(p.last).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) : '—';
+function exportCSV() {
+  const rows = [['Élève', 'Langue', 'Niveau de départ', 'Thèmes réussis', 'Étoiles', 'Mots vus', 'Série (jours)', 'Dernière activité']];
+  S.profiles.forEach(p => Object.keys(p.langs || { [p.lang]: 1 }).forEach(k => {
+    const t = studentStats(p, k);
+    rows.push([p.name, LANGS[k].name, t.level, `${t.done}/${ALL_UNITS.length}`, t.stars, t.words, p.streak.n, p.last ? new Date(p.last).toLocaleDateString('fr-FR') : '']);
+  }));
+  const csv = '\ufeff' + rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(';')).join('\r\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  a.download = `linguapop-classe-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+}
 let parentOk = false;
 function renderParents() {
   setWorld(COURSE[1]);
   if (!parentOk) {
     const x = 3 + Math.floor(Math.random() * 7), y = 3 + Math.floor(Math.random() * 7);
-    app.innerHTML = topbar() + `<main class="home" style="text-align:center"><div style="font-size:70px;margin-top:20px">👪</div><h2>Espace parents</h2><p style="color:var(--muted)">Pour entrer, combien font <b>${x} × ${y}</b> ?</p>
+    app.innerHTML = topbar() + `<main class="home" style="text-align:center"><div style="font-size:70px;margin-top:20px">🧑‍🏫</div><h2>Espace parents & professeurs</h2><p style="color:var(--muted)">Pour entrer, combien font <b>${x} × ${y}</b> ?</p>
       <input class="text-in" id="ans" inputmode="numeric" style="max-width:200px;text-align:center"><br><br><button class="btn" id="ok">Entrer</button></main>` + tabbar();
     bindChrome();
     on('#ok', () => { if (+app.querySelector('#ans').value === x * y) { parentOk = true; renderParents(); } else { SFX.bad(); toast('Ce n\'est pas ça 🙂'); } });
@@ -814,9 +837,18 @@ function renderParents() {
   const sw = (k, t, d) => `<div class="setting"><span><b>${t}</b><small>${d}</small></span><button class="switch ${st[k] ? 'on' : ''}" data-k="${k}" aria-label="${t}"></button></div>`;
   const perLang = Object.keys(LANGS).map(k => { const pr = p.progress[k] || {}; const done = ALL_UNITS.filter(u => (pr[u.id] || {}).quiz).length; return `<li>${LANGS[k].flag} ${LANGS[k].name} : ${done}/${ALL_UNITS.length} thèmes réussis · ${Object.keys(p.learned[k] || {}).length} mots vus</li>`; }).join('');
   app.innerHTML = topbar() + `<main class="home">
-    <h2>👪 Espace parents</h2>
-    <h3 class="sec">Progression de ${esc(p.name)}</h3>
+    <h2>🧑‍🏫 Parents & professeurs</h2>
+    <h3 class="sec">Toute la classe · ${S.profiles.length} élève${S.profiles.length > 1 ? 's' : ''}</h3>
+    <div class="table-wrap"><table class="class-table">
+      <thead><tr><th>Élève</th><th>Langue</th><th>Niv.</th><th>Thèmes</th><th>⭐</th><th>Mots</th><th>🔥</th><th>Vu le</th></tr></thead>
+      <tbody>${S.profiles.map(q => { const t = studentStats(q, q.lang); return `<tr data-pid="${q.id}" class="${q.id === p.id ? 'sel' : ''}"><td>${q.avatar} ${esc(q.name)}</td><td>${LANGS[q.lang].flag}</td><td>${t.level}</td><td>${t.done}/${ALL_UNITS.length}</td><td>${t.stars}</td><td>${t.words}</td><td>${q.streak.n}</td><td>${lastSeen(q)}</td></tr>`; }).join('')}</tbody>
+    </table></div>
+    <p style="color:var(--muted);font-size:14px;margin:6px 0 10px">Touchez un élève pour voir son détail et régler son niveau.</p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn white" data-a="add" style="flex:1">➕ Ajouter un élève</button><button class="btn white" data-a="csv" style="flex:1">📊 Exporter (tableur)</button></div>
+    <h3 class="sec">Détail : ${p.avatar} ${esc(p.name)}</h3>
     <ul style="line-height:1.7;padding-left:18px;margin:0">${perLang}</ul>
+    <div class="setting" style="margin-top:12px"><span><b>Niveau en ${LANGS[p.lang].name.toLowerCase()}</b><small>Débloque directement les thèmes jusqu'à ce niveau</small></span>
+      <span style="display:flex;gap:4px">${LEVELS.map(l => `<button class="chip ${startLevel() === l ? 'on-chip' : ''}" data-lvl="${l}">${l}</button>`).join('')}</span></div>
     <h3 class="sec">Réglages</h3>
     ${sw('sound', 'Sons et musique', 'Petits bruitages pendant les jeux')}
     ${sw('slow', 'Voix plus lente', 'Pratique pour les plus jeunes')}
@@ -826,8 +858,8 @@ function renderParents() {
     <div class="note">De vraies voix enregistrées, avec l'accent du pays. « Hors connexion » télécharge toutes les voix d'une langue (environ 8 Mo) pour jouer sans internet.</div>
     <h3 class="sec">Niveaux CECRL</h3>
     <div class="note" style="background:#EEF9FF">A1 : premiers mots · A2 : la vie de tous les jours · B1 : raconter et expliquer · B2 : donner son avis, hypothèses. (Le cadre européen s'arrête à C2 ; il n'existe pas de « B3 ».)</div>
-    <h3 class="sec">Joueur</h3>
-    <button class="btn white block" data-a="switch">Changer de joueur</button>
+    <h3 class="sec">Élève</h3>
+    <button class="btn white block" data-a="switch">Changer d'élève</button>
     <button class="danger block" data-a="del" style="width:100%">Supprimer le profil de ${esc(p.name)}</button>
   </main>` + tabbar();
   bindChrome();
@@ -846,6 +878,10 @@ function renderParents() {
   });
   on('.switch', el => { st[el.dataset.k] = !st[el.dataset.k]; save(); SFX.tap(); renderParents(); });
   on('[data-a=switch]', () => go(renderProfiles));
+  on('[data-pid]', el => { S.current = el.dataset.pid; save(); SFX.tap(); renderParents(); });
+  on('[data-a=add]', () => go(renderNewProfile));
+  on('[data-a=csv]', exportCSV);
+  on('[data-lvl]', el => { p.start = p.start || {}; p.start[p.lang] = el.dataset.lvl; save(); SFX.ok(); toast(`${p.name} : niveau ${el.dataset.lvl} en ${LANGS[p.lang].name.toLowerCase()}`); renderParents(); });
   on('[data-a=del]', () => sheet(`<h2>Supprimer ${esc(p.name)} ?</h2><p style="text-align:center">Toute sa progression, ses pièces et ses cartes seront perdues.</p><div style="display:flex;flex-direction:column;gap:12px"><button class="btn white block" data-k="no">Annuler</button><button class="btn block" style="background:var(--red);box-shadow:0 5px 0 var(--red-d)" data-k="yes">Supprimer</button></div>`,
     (el, close) => {
       el.querySelector('[data-k=no]').onclick = close;
