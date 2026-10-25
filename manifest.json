@@ -1,0 +1,14 @@
+{
+  "name": "LinguaPop",
+  "short_name": "LinguaPop",
+  "description": "Anglais, portugais et espagnol pour les enfants, en jouant !",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#FFF7E8",
+  "theme_color": "#8E7DFF",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
