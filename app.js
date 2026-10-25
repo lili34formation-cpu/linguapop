@@ -121,10 +121,35 @@ function voiceFor(tag) {
   if (exact.length) return exact.find(v => /enhanced|premium|natural/i.test(v.name)) || exact[0];
   return voices.find(v => vlang(v).startsWith(t.slice(0, 2))) || null;
 }
+// Voix réelles pré-enregistrées (audio/<hash>.mp3), générées par tools/generate_audio.py.
+// Le hash doit rester identique à audio_key() dans ce script (FNV-1a 32 bits de « lang|texte »).
+let AUDIO_INDEX = new Set(), curAudio = null;
+fetch('audio/index.json').then(r => r.ok ? r.json() : []).then(l => { AUDIO_INDEX = new Set(l); }).catch(() => {});
+function audioKey(text, tag) {
+  let h = 0x811c9dc5;
+  for (const b of new TextEncoder().encode(`${tag}|${text.trim()}`)) { h ^= b; h = Math.imul(h, 0x01000193) >>> 0; }
+  return h.toString(16).padStart(8, '0');
+}
+function stopVoice() {
+  if (curAudio) { curAudio.pause(); curAudio = null; }
+  try { speechSynthesis.cancel(); } catch (e) { /* */ }
+}
 function say(text, slow = false, lang = L()) {
+  stopVoice();
+  const key = audioKey(text, LANGS[lang].tts);
+  if (AUDIO_INDEX.has(key)) {
+    const a = new Audio(`audio/${key}.mp3`);
+    a.playbackRate = slow ? 0.65 : (S.settings.slow ? 0.8 : 1);
+    curAudio = a;
+    a.play().catch(() => sayDevice(text, slow, lang));
+    return;
+  }
+  sayDevice(text, slow, lang);
+}
+// Secours : voix de l'appareil, si un texte n'a pas d'enregistrement.
+function sayDevice(text, slow, lang) {
   if (!('speechSynthesis' in window)) return;
   try {
-    speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
     u.lang = LANGS[lang].tts;
     const v = voiceFor(u.lang); if (v) u.voice = v;
@@ -226,7 +251,7 @@ function checkBadges(ctx = {}) {
 
 // ---------- Navigation ----------
 let tab = 'map', worldSel = null;
-function go(fn, ...args) { try { speechSynthesis.cancel(); } catch (e) { /* */ } window.scrollTo(0, 0); fn(...args); }
+function go(fn, ...args) { stopVoice(); window.scrollTo(0, 0); fn(...args); }
 
 function topbar() {
   const p = P(), lg = LANGS[p.lang];
@@ -335,7 +360,7 @@ function renderHome() {
     }).join('')}</div>
   </main>` + tabbar();
   bindChrome();
-  on('[data-a=pip]', el => { el.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.3) rotate(15deg)' }, { transform: 'scale(1)' }], 500); say(`${LANGS[L()].hello} ${p.name}!`); });
+  on('[data-a=pip]', el => { el.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.3) rotate(15deg)' }, { transform: 'scale(1)' }], 500); say(LANGS[L()].hello); });
   on('[data-a=daily]', () => { if (d) { toast('Déjà fait aujourd\'hui ! Bravo 🎉'); return; } startDaily(); });
   on('[data-w]', el => { const c = COURSE.find(x => x.level === el.dataset.w); if (!levelUnlocked(c)) { SFX.bad(); toast('🔒 Termine le monde précédent pour ouvrir celui-ci !'); return; } SFX.tap(); worldSel = c.level; renderHome(); });
   on('[data-u]', el => {
@@ -784,7 +809,8 @@ function renderParents() {
     return;
   }
   const p = P(), st = S.settings;
-  const vinfo = Object.entries(LANGS).map(([k, l]) => { const v = voiceFor(l.tts), exact = v && vlang(v) === l.tts.toLowerCase(); return `<li>${l.flag} ${l.name} : ${v ? `${esc(v.name)} ${exact ? '✅' : `⚠️ (${esc(v.lang)})`}` : '❌ aucune voix'}</li>`; }).join('');
+  const VNAME = { en: 'Sonia (Royaume-Uni)', pt: 'Raquel (Portugal)', es: 'Elvira (Espagne)' };
+  const vinfo = Object.entries(LANGS).map(([k, l]) => `<li>${l.flag} ${l.name} : ${VNAME[k]} <button class="chip" data-dl="${k}" style="margin-left:6px">📥 Hors connexion</button> <small id="dl-${k}"></small></li>`).join('');
   const sw = (k, t, d) => `<div class="setting"><span><b>${t}</b><small>${d}</small></span><button class="switch ${st[k] ? 'on' : ''}" data-k="${k}" aria-label="${t}"></button></div>`;
   const perLang = Object.keys(LANGS).map(k => { const pr = p.progress[k] || {}; const done = ALL_UNITS.filter(u => (pr[u.id] || {}).quiz).length; return `<li>${LANGS[k].flag} ${LANGS[k].name} : ${done}/${ALL_UNITS.length} thèmes réussis · ${Object.keys(p.learned[k] || {}).length} mots vus</li>`; }).join('');
   app.innerHTML = topbar() + `<main class="home">
@@ -795,9 +821,9 @@ function renderParents() {
     ${sw('sound', 'Sons et musique', 'Petits bruitages pendant les jeux')}
     ${sw('slow', 'Voix plus lente', 'Pratique pour les plus jeunes')}
     ${sw('unlockAll', 'Tout débloquer', 'Accès libre à tous les thèmes et niveaux')}
-    <h3 class="sec">Voix de l'appareil</h3>
+    <h3 class="sec">Voix</h3>
     <ul style="line-height:1.7;padding-left:18px;margin:0">${vinfo}</ul>
-    <div class="note">Les voix viennent du téléphone ou de l'ordinateur. Sur iPhone : Réglages › Accessibilité › Contenu énoncé › Voix, et téléchargez une voix « Portugais (Portugal) », « Espagnol (Espagne) » et « Anglais (R.-U.) » pour un meilleur accent.</div>
+    <div class="note">De vraies voix enregistrées, avec l'accent du pays. « Hors connexion » télécharge toutes les voix d'une langue (environ 8 Mo) pour jouer sans internet.</div>
     <h3 class="sec">Niveaux CECRL</h3>
     <div class="note" style="background:#EEF9FF">A1 : premiers mots · A2 : la vie de tous les jours · B1 : raconter et expliquer · B2 : donner son avis, hypothèses. (Le cadre européen s'arrête à C2 ; il n'existe pas de « B3 ».)</div>
     <h3 class="sec">Joueur</h3>
@@ -805,6 +831,19 @@ function renderParents() {
     <button class="danger block" data-a="del" style="width:100%">Supprimer le profil de ${esc(p.name)}</button>
   </main>` + tabbar();
   bindChrome();
+  on('[data-dl]', async el => {
+    const k = el.dataset.dl, info = app.querySelector(`#dl-${k}`);
+    try {
+      const list = await (await fetch(`audio/index-${LANGS[k].tts}.json`)).json();
+      const cache = await caches.open('linguapop-audio');
+      let n = 0;
+      for (let i = 0; i < list.length; i += 8) {
+        await Promise.all(list.slice(i, i + 8).map(h => cache.add(`audio/${h}.mp3`).catch(() => {})));
+        n = Math.min(list.length, i + 8); info.textContent = `${Math.round(n / list.length * 100)} %`;
+      }
+      info.textContent = '✅ prêt';
+    } catch (e) { info.textContent = '⚠️ connexion nécessaire'; }
+  });
   on('.switch', el => { st[el.dataset.k] = !st[el.dataset.k]; save(); SFX.tap(); renderParents(); });
   on('[data-a=switch]', () => go(renderProfiles));
   on('[data-a=del]', () => sheet(`<h2>Supprimer ${esc(p.name)} ?</h2><p style="text-align:center">Toute sa progression, ses pièces et ses cartes seront perdues.</p><div style="display:flex;flex-direction:column;gap:12px"><button class="btn white block" data-k="no">Annuler</button><button class="btn block" style="background:var(--red);box-shadow:0 5px 0 var(--red-d)" data-k="yes">Supprimer</button></div>`,
