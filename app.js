@@ -71,7 +71,10 @@ const STORE = 'linguapop.v1';
 let S;
 try { S = JSON.parse(localStorage.getItem(STORE)); } catch (e) { S = null; }
 if (!S || !Array.isArray(S.profiles)) S = { profiles: [], current: null, settings: { sound: true, slow: false, unlockAll: false } };
-function save() { try { localStorage.setItem(STORE, JSON.stringify(S)); } catch (e) { /* stockage indisponible */ } }
+function save() {
+  try { localStorage.setItem(STORE, JSON.stringify(S)); } catch (e) { /* stockage indisponible */ }
+  if (typeof acctSchedule === 'function') acctSchedule(); // sauvegarde en ligne (account.js)
+}
 const P = () => S.profiles.find(p => p.id === S.current);
 const L = () => P().lang;
 function prog(lang = L()) { const p = P(); p.progress[lang] = p.progress[lang] || {}; return p.progress[lang]; }
@@ -280,17 +283,20 @@ function renderMain() {
 // ---------- Profils ----------
 function renderProfiles() {
   setWorld(COURSE[2]);
+  const acct = typeof acctBar === 'function';
   app.innerHTML = `<div class="welcome">
+    ${acct ? acctBar() : ''}
     <div class="mascot">🦊</div>
     <h1 class="logo"><span>Lin</span><span>gua</span><span>Po</span><span>p</span></h1>
     <p class="tagline">Qui joue aujourd'hui ?</p>
     <div class="profiles">
-      ${S.profiles.map(p => `<button class="profile" data-id="${p.id}"><span class="face">${p.avatar}</span><span class="nm">${esc(p.name)}</span><span class="sub">${LANGS[p.lang].flag} ⭐ ${Object.values(p.progress).reduce((a, pr) => a + Object.values(pr).reduce((b, u) => b + ACTS.reduce((c, x) => c + (u[x.id] || 0), 0), 0), 0)}</span></button>`).join('')}
-      ${S.profiles.length < 40 ? `<button class="profile add" data-a="add"><span class="face">➕</span><span class="nm">Nouveau</span></button>` : ''}
+      ${S.profiles.map(p => `<button class="profile" data-id="${p.id}"><span class="pface">${p.avatar}</span><span class="nm">${esc(p.name)}</span><span class="sub">${LANGS[p.lang].flag} ⭐ ${Object.values(p.progress).reduce((a, pr) => a + Object.values(pr).reduce((b, u) => b + ACTS.reduce((c, x) => c + (u[x.id] || 0), 0), 0), 0)}</span></button>`).join('')}
+      ${S.profiles.length < 40 ? `<button class="profile add" data-a="add"><span class="pface">➕</span><span class="nm">Nouveau</span></button>` : ''}
     </div>
   </div>`;
   on('.profile[data-id]', el => { S.current = el.dataset.id; save(); SFX.ok(); tab = 'map'; worldSel = null; go(renderMain); });
   on('[data-a=add]', () => go(renderNewProfile));
+  if (acct) acctBind();
 }
 
 function renderNewProfile() {
@@ -549,7 +555,7 @@ function playSpell(u) {
     const w = words[i], target = strip(w[lang], lang).normalize('NFC').toLowerCase(), letters = [...target];
     const extra = shuffle([...'abcdefghilmnoprstu'].filter(c => !letters.includes(c))).slice(0, 2);
     const tiles = shuffle(letters.concat(extra));
-    let slots = [], missed = false;
+    let slots = letters.map(() => null), missed = false; // une case vide par lettre
     q.innerHTML = `<div class="big-emoji" style="font-size:96px;margin-bottom:6px">${w.e}</div>
       <p style="text-align:center;margin:0;color:var(--muted);font-size:18px">${esc(w.fr)}</p>
       <div class="say-row" style="margin:12px 0"><button class="say small" data-s="n">🔊</button><button class="say small" data-s="s">🐢</button></div>
@@ -574,7 +580,7 @@ function playSpell(u) {
         on('[data-a=next]', () => { i++; draw(); }, fb);
       } else {
         missed = true; SFX.bad(); box.classList.remove('ko'); void box.offsetWidth; box.classList.add('ko');
-        setTimeout(() => { slots = slots.map((s, k) => s && s.hint ? s : (tiles[s.t] === letters[k] ? s : null)); paint(); }, 450);
+        setTimeout(() => { slots = slots.map((s, k) => s && (s.hint || tiles[s.t] === letters[k]) ? s : null); paint(); }, 450);
       }
     };
     on('.tile', el => {
@@ -783,7 +789,7 @@ function renderTrophies() {
   setWorld(COURSE[0]);
   const words = Object.keys(learned()).length;
   app.innerHTML = topbar() + `<main class="home">
-    <div class="me-card"><span class="face">${p.avatar}</span><div style="flex:1"><h2>${esc(p.name)}</h2><div style="color:var(--muted)">Niveau ${lvl} · ${titleFor(lvl)}</div><div class="xp"><i style="width:${(p.xp - a) / (b - a) * 100}%"></i></div><small style="color:var(--muted)">${p.xp - a} / ${b - a} XP</small></div></div>
+    <div class="me-card"><span class="pface">${p.avatar}</span><div style="flex:1"><h2>${esc(p.name)}</h2><div style="color:var(--muted)">Niveau ${lvl} · ${titleFor(lvl)}</div><div class="xp"><i style="width:${(p.xp - a) / (b - a) * 100}%"></i></div><small style="color:var(--muted)">${p.xp - a} / ${b - a} XP</small></div></div>
     <div class="stats">
       <div class="stat"><span class="e">📖</span><span><b>${words}</b><small>mots appris (${LANGS[L()].name.toLowerCase()})</small></span></div>
       <div class="stat"><span class="e">⭐</span><span><b>${totalStars()}</b><small>étoiles</small></span></div>
@@ -858,6 +864,7 @@ function renderParents() {
     <div class="note">De vraies voix enregistrées, avec l'accent du pays. « Hors connexion » télécharge toutes les voix d'une langue (environ 8 Mo) pour jouer sans internet.</div>
     <h3 class="sec">Niveaux CECRL</h3>
     <div class="note" style="background:#EEF9FF">A1 : premiers mots · A2 : la vie de tous les jours · B1 : raconter et expliquer · B2 : donner son avis, hypothèses. (Le cadre européen s'arrête à C2 ; il n'existe pas de « B3 ».)</div>
+    ${typeof acctSection === 'function' ? acctSection() : ''}
     <h3 class="sec">Élève</h3>
     <button class="btn white block" data-a="switch">Changer d'élève</button>
     <button class="danger block" data-a="del" style="width:100%">Supprimer le profil de ${esc(p.name)}</button>
@@ -881,6 +888,7 @@ function renderParents() {
   on('[data-pid]', el => { S.current = el.dataset.pid; save(); SFX.tap(); renderParents(); });
   on('[data-a=add]', () => go(renderNewProfile));
   on('[data-a=csv]', exportCSV);
+  if (typeof acctSectionBind === 'function') acctSectionBind();
   on('[data-lvl]', el => { p.start = p.start || {}; p.start[p.lang] = el.dataset.lvl; save(); SFX.ok(); toast(`${p.name} : niveau ${el.dataset.lvl} en ${LANGS[p.lang].name.toLowerCase()}`); renderParents(); });
   on('[data-a=del]', () => sheet(`<h2>Supprimer ${esc(p.name)} ?</h2><p style="text-align:center">Toute sa progression, ses pièces et ses cartes seront perdues.</p><div style="display:flex;flex-direction:column;gap:12px"><button class="btn white block" data-k="no">Annuler</button><button class="btn block" style="background:var(--red);box-shadow:0 5px 0 var(--red-d)" data-k="yes">Supprimer</button></div>`,
     (el, close) => {
