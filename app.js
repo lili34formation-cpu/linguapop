@@ -6,7 +6,7 @@ const LANG_COL = { en: 2, pt: 3, es: 4 };
 const ALL_UNITS = [];
 COURSE.forEach(lv => lv.units.forEach(u => {
   u.level = lv.level; u.world = lv;
-  u.W = u.words.map((w, i) => ({ key: `${u.id}.${i}`, e: w[0], fr: w[1], en: w[2], pt: w[3], es: w[4] }));
+  u.W = u.words.map((w, i) => ({ key: `${u.id}.${i}`, e: w[0], fr: w[1], en: w[2], pt: w[3], es: w[4], textOnly: !!u.textOnly }));
   u.S = u.sentences.map(s => ({ e: s[0], fr: s[1], en: s[2], pt: s[3], es: s[4] }));
   ALL_UNITS.push(u);
 }));
@@ -205,6 +205,8 @@ function unitUnlocked(u) {
   const i = ALL_UNITS.indexOf(u), si = levelIdx(startLevel());
   if (i === 0 || levelIdx(u.level) < si) return true;
   if (u === COURSE[si].units[0]) return true;
+  // Un thème déjà commencé, ou suivi d'un thème réussi (thème ajouté plus tard), reste ouvert
+  if (unitStars(u) > 0 || ALL_UNITS.slice(i + 1).some(unitDone)) return true;
   return unitDone(ALL_UNITS[i - 1]);
 }
 const levelUnlocked = lv => unitUnlocked(lv.units[0]);
@@ -438,7 +440,11 @@ function playCards(u) {
 }
 
 // ---------- 2 & 3. Quiz, Écoute, Défi du jour ----------
+// Thèmes sans image parlante (ex. les jours) : on remplace l'image par le mot français
+const TEXT_TYPE = { img2word: 'fr2word', word2img: 'word2fr', listen: 'listen2fr' };
+const FR_OPTS = t => t === 'word2fr' || t === 'listen2fr';
 function buildQuestion(w, pool, type) {
+  if (w.textOnly && TEXT_TYPE[type]) type = TEXT_TYPE[type];
   const others = shuffle(pool.filter(x => x.key !== w.key && x.e !== w.e && x[L()] !== w[L()]));
   return { w, type, opts: shuffle([w, ...others.slice(0, 3)]) };
 }
@@ -461,14 +467,15 @@ function playQuestions(u, mode, daily = null) {
       return finish({ u, act: daily ? 'daily' : mode, stars: ratio >= 0.9 ? 3 : ratio >= 0.65 ? 2 : 1, correct: firstOk, total, coins, daily: !!daily });
     }
     const cur = queue.shift(), w = cur.w;
-    const textOpts = cur.type === 'img2word' || cur.type === 'fr2word';
+    const textOpts = cur.type !== 'word2img' && cur.type !== 'listen';
     let head = '';
     if (cur.type === 'img2word') head = `<p class="prompt">Qu'est-ce que c'est ?</p><div class="big-emoji">${w.e}</div>`;
     if (cur.type === 'fr2word') head = `<p class="prompt">Comment dit-on…</p><div class="target-word" style="color:var(--muted)">« ${esc(w.fr)} »</div><div style="height:20px"></div>`;
     if (cur.type === 'word2img') head = `<p class="prompt">Touche la bonne image</p><div class="target-word">${esc(w[lang])}</div><div class="say-row"><button class="say small" data-s="n">🔊</button><button class="say small" data-s="s">🐢</button></div>`;
-    if (cur.type === 'listen') head = `<p class="prompt">Écoute bien… 👂</p><div class="say-row"><button class="say big" data-s="n">🔊</button><button class="say" data-s="s" style="align-self:end">🐢</button></div>`;
-    q.innerHTML = head + `<div class="opts ${textOpts ? '' : 'grid'}">${cur.opts.map((o, i) => `<button class="opt ${textOpts ? '' : 'emoji'}" data-i="${i}">${textOpts ? esc(o[lang]) : o.e}</button>`).join('')}</div>`;
-    if (cur.type === 'word2img' || cur.type === 'listen') setTimeout(() => say(w[lang]), 250);
+    if (cur.type === 'word2fr') head = `<p class="prompt">Qu'est-ce que ça veut dire ?</p><div class="target-word">${esc(w[lang])}</div><div class="say-row"><button class="say small" data-s="n">🔊</button><button class="say small" data-s="s">🐢</button></div>`;
+    if (cur.type === 'listen' || cur.type === 'listen2fr') head = `<p class="prompt">${cur.type === 'listen' ? 'Écoute bien… 👂' : 'Écoute… qu\'est-ce que ça veut dire ? 👂'}</p><div class="say-row"><button class="say big" data-s="n">🔊</button><button class="say" data-s="s" style="align-self:end">🐢</button></div>`;
+    q.innerHTML = head + `<div class="opts ${textOpts ? '' : 'grid'}">${cur.opts.map((o, i) => `<button class="opt ${textOpts ? '' : 'emoji'}" data-i="${i}">${FR_OPTS(cur.type) ? esc(o.fr) : textOpts ? esc(o[lang]) : o.e}</button>`).join('')}</div>`;
+    if (cur.type !== 'img2word' && cur.type !== 'fr2word') setTimeout(() => say(w[lang]), 250);
     on('[data-s]', el => say(w[lang], el.dataset.s === 's'), q);
     let answered = false;
     on('.opt', el => {
@@ -515,8 +522,8 @@ function playMemory(u) {
   app.innerHTML = gameShell(0);
   bindQuit(() => renderUnit(u));
   const q = app.querySelector('#q');
-  q.innerHTML = `<p class="prompt">Trouve l'image et son mot !</p><div class="mem-info"><span>Coups : <b id="mv">0</b></span><span>Paires : <b id="pr">0</b>/${words.length}</span></div>
-    <div class="mem">${cards.map((c, i) => `<div class="mcard" data-i="${i}"><div class="flip-in"><div class="face front">❓</div><div class="face back">${c.kind === 'e' ? `<span class="e">${c.w.e}</span>` : `<span class="w">${esc(c.w[lang])}</span>`}</div></div></div>`).join('')}</div>`;
+  q.innerHTML = `<p class="prompt">${u.textOnly ? 'Trouve le mot et sa traduction !' : "Trouve l'image et son mot !"}</p><div class="mem-info"><span>Coups : <b id="mv">0</b></span><span>Paires : <b id="pr">0</b>/${words.length}</span></div>
+    <div class="mem">${cards.map((c, i) => `<div class="mcard" data-i="${i}"><div class="flip-in"><div class="face front">❓</div><div class="face back">${c.kind === 'e' ? (u.textOnly ? `<span class="w" style="color:var(--purple-d)">${esc(c.w.fr)}</span>` : `<span class="e">${c.w.e}</span>`) : `<span class="w">${esc(c.w[lang])}</span>`}</div></div></div>`).join('')}</div>`;
   on('.mcard', el => {
     if (lock || el.classList.contains('open') || el.classList.contains('found')) return;
     const c = cards[+el.dataset.i];
@@ -552,7 +559,7 @@ function playSpell(u) {
   const draw = () => {
     fb.innerHTML = '';
     if (i >= words.length) { const r = firstOk / words.length; return finish({ u, act: 'spell', stars: r >= 0.9 ? 3 : r >= 0.6 ? 2 : 1, correct: firstOk, total: words.length, coins, noHint: hints === 0 && r === 1 }); }
-    const w = words[i], target = strip(w[lang], lang).normalize('NFC').toLowerCase(), letters = [...target];
+    const w = words[i], target = strip(w[lang], lang).normalize('NFC'), letters = [...target];
     const extra = shuffle([...'abcdefghilmnoprstu'].filter(c => !letters.includes(c))).slice(0, 2);
     const tiles = shuffle(letters.concat(extra));
     let slots = letters.map(() => null), missed = false; // une case vide par lettre
@@ -680,10 +687,12 @@ function playChrono(u) {
     }, 1000);
     const ask = () => {
       let w; do { w = pick(u.W); } while (u.W.length > 1 && w === last); last = w;
-      const qq = buildQuestion(w, u.W, Math.random() < 0.5 ? 'img2word' : 'word2img'), text = qq.type === 'img2word';
-      q.innerHTML = `<div class="chrono-score">Score : ${score} 🏆</div>
-        ${text ? `<div class="big-emoji" style="font-size:100px">${w.e}</div>` : `<div class="target-word" style="margin:30px 0 30px">${esc(w[lang])}</div>`}
-        <div class="opts ${text ? '' : 'grid'}">${qq.opts.map((o, k) => `<button class="opt ${text ? '' : 'emoji'}" data-i="${k}" style="${text ? '' : 'min-height:96px;font-size:52px'}">${text ? esc(o[lang]) : o.e}</button>`).join('')}</div>`;
+      const qq = buildQuestion(w, u.W, Math.random() < 0.5 ? 'img2word' : 'word2img'), t = qq.type, text = t !== 'word2img';
+      const shown = t === 'img2word' ? `<div class="big-emoji" style="font-size:100px">${w.e}</div>`
+        : t === 'fr2word' ? `<div class="target-word" style="margin:30px 0;color:var(--muted)">« ${esc(w.fr)} »</div>`
+        : `<div class="target-word" style="margin:30px 0">${esc(w[lang])}</div>`;
+      q.innerHTML = `<div class="chrono-score">Score : ${score} 🏆</div>${shown}
+        <div class="opts ${text ? '' : 'grid'}">${qq.opts.map((o, k) => `<button class="opt ${text ? '' : 'emoji'}" data-i="${k}" style="${text ? '' : 'min-height:96px;font-size:52px'}">${FR_OPTS(t) ? esc(o.fr) : text ? esc(o[lang]) : o.e}</button>`).join('')}</div>`;
       on('.opt', el => {
         if (left <= 0) return;
         const good = qq.opts[+el.dataset.i].key === w.key;

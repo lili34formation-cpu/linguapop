@@ -1,5 +1,5 @@
 // LinguaPop — mise en cache pour jouer hors connexion.
-const CACHE = 'linguapop-v3';
+const CACHE = 'linguapop-v4';
 const CORE = ['./', 'index.html', 'styles.css', 'content.js', 'app.js', 'account.js', 'manifest.json', 'icon.svg'];
 
 self.addEventListener('install', e => {
